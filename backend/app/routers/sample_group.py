@@ -65,6 +65,23 @@ def export_entries(
         headers={"Content-Disposition": 'attachment; filename="sample_group.csv"'})
 
 
+@router.get("/{entry_id}/members", response_model=dict)
+def get_group_members(entry_id: int) -> dict:
+    """读取分群成员明细：同一快照版本内结果稳定，AB对比按这批成员算均值。"""
+    entry = service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"样本分群 {entry_id} 不存在或已归档")
+    members = service.get_group_members(entry_id)
+    return {
+        "group_id": entry_id,
+        "分群编号": entry.get("分群编号"),
+        "group_type": entry.get("group_type", "control"),
+        "成员快照版本": service.snapshot_version(entry),
+        "total": len(members),
+        "items": members,
+    }
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条样本分群明细；不存在时给出可读的错误说明。"""

@@ -7,6 +7,7 @@
       </div>
       <div class="page-actions">
         <button class="btn primary" data-testid="open-create" type="button" @click="openCreate">登记指标定义</button>
+        <button class="btn" data-testid="verify-ab-compare" type="button" @click="verifyAbCompare">核对AB对比结果表</button>
         <button class="btn" data-testid="export" type="button" @click="exportRows">导出指标定义清单</button>
       </div>
     </header>
@@ -74,6 +75,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条指标定义记录</span>
+      <span v-if="compareNote" :class="compareOk ? '' : 'error-text'" data-testid="ab-compare-verdict">{{ compareNote }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -100,11 +102,32 @@ const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const compareNote = ref('')
+const compareOk = ref(true)
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
   { label: metricNames[2], value: rows.value.filter((row) => row.status === statuses[statuses.length - 1]).length },
 ])
+
+async function verifyAbCompare() {
+  compareNote.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/verify-ab-compare`)
+    if (!response.ok) throw new Error('AB对比结果表核对失败')
+    const payload = await response.json()
+    compareOk.value = Boolean(payload.ok)
+    if (payload.ok) {
+      compareNote.value = `AB对比结果表核对通过：${payload.checked} 行差异均为实验组均值减对照组均值，指标版本一致（${payload.release}）`
+    } else {
+      const first = (payload.problems || [])[0]
+      compareNote.value = `AB对比结果表核对未通过：${first ? `${first.报告编号} ${first.问题}` : payload.message}`
+    }
+  } catch (error) {
+    compareOk.value = false
+    compareNote.value = error instanceof Error ? error.message : 'AB对比结果表核对失败'
+  }
+}
 
 function resetFilters() {
   filters.value = {}

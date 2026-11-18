@@ -4,10 +4,15 @@
 """
 from __future__ import annotations
 
+import copy
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from app.seed import SEED_ROWS
+
+# 内部派生表：给业务流程存放中间结果，不算业务模块，不出现在概览和健康检查里。
+INTERNAL_MODULES = {"ab_compare_results", "ab_compare_results_backup"}
 
 
 class Store:
@@ -17,12 +22,62 @@ class Store:
         }
         self._versions: dict[str, int] = {name: 1 for name in self._tables}
         self._created_at: dict[str, float] = {name: time.time() for name in self._tables}
+        self._journal: list[tuple[str, list[dict[str, Any]], int]] | None = None
+
+    # ---- 事务：整表快照，任一步失败整体回到事务开始前的版本 ----
+    def begin(self) -> None:
+        """记录所有表的完整快照，作为本次事务可回滚到的唯一版本。"""
+        self._journal = [
+            (name, copy.deepcopy(rows), self._versions.get(name, 1))
+            for name, rows in self._tables.items()
+        ]
+
+    def commit(self) -> None:
+        """提交：截止版本一次性推进，读侧不会看到半成品。"""
+        self._journal = None
+
+    def rollback(self) -> list[str]:
+        """回滚到事务开始时的完整版本，返回被恢复的模块名。"""
+        if self._journal is None:
+            return []
+        restored: list[str] = []
+        for name, rows, version in self._journal:
+            self._tables[name] = rows
+            self._versions[name] = version
+            restored.append(name)
+        # 事务期间新建的表也要撤掉，否则会留下「事务产物」这种残留。
+        known = {name for name, _rows, _version in self._journal}
+        for name in list(self._tables):
+            if name not in known:
+                del self._tables[name]
+                self._versions.pop(name, None)
+                restored.append(name)
+        self._journal = None
+        return restored
+
+    @contextmanager
+    def transaction(self) -> Iterator["Store"]:
+        self.begin()
+        try:
+            yield self
+        except BaseException:
+            self.rollback()
+            raise
+        else:
+            self.commit()
+
+    def in_transaction(self) -> bool:
+        return self._journal is not None
 
     def module_names(self) -> list[str]:
-        return sorted(self._tables)
+        return sorted(name for name in self._tables if name not in INTERNAL_MODULES)
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])
+
+    def replace_rows(self, module: str, rows: list[dict[str, Any]]) -> None:
+        """整表替换：只用于事务内一次性写入完整结果，避免部分写入。"""
+        self._tables[module] = [dict(row) for row in rows]
 
     def find(self, module: str, entry_id: int) -> dict[str, Any] | None:
         for row in self.rows(module):

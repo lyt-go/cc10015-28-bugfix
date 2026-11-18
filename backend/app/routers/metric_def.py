@@ -65,6 +65,18 @@ def export_entries(
         headers={"Content-Disposition": 'attachment; filename="metric_def.csv"'})
 
 
+@router.get("/verify-ab-compare")
+@router.get("/ab-compare-verify")
+@router.post("/verify-ab-compare")
+@router.post("/ab-compare-verify")
+def verify_ab_compare() -> dict:
+    """V028 跨模块核对：读取AB对比结果表的指标版本，校验差异=实验组-对照组（同一口径）。
+
+    核对只读已提交的结果表；仅当结果表尚未生成时才先补齐一次。
+    """
+    return service.verify_ab_compare()
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条指标定义明细；不存在时给出可读的错误说明。"""

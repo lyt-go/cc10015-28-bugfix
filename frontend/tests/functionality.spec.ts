@@ -606,6 +606,27 @@ test('分析看板模块：KPI卡片、运行分析、图表渲染', async ({ pa
     await page.getByTestId('run-analysis').click()
     await expect(page.locator('.analysis-bar').first()).toBeVisible({ timeout: 5000 })
     await expect(page.locator('.data-table tbody tr').first()).toBeVisible({ timeout: 5000 })
+    if (mod.key === 'ab_result') {
+      // AB对比结果表：差异必须等于同一版本下方两侧均值之差，详情与列表同版本。
+      const compareRows = page.locator('tbody tr[data-testid^="compare-row-"]')
+      const rowCount = await compareRows.count()
+      expect(rowCount).toBeGreaterThan(0)
+      for (let index = 0; index < rowCount; index++) {
+        const cells = await compareRows.nth(index).locator('td').allInnerTexts()
+        const control = Number(cells[4])
+        const treated = Number(cells[5])
+        const diff = Number(cells[6])
+        expect(Math.abs(diff - (treated - control))).toBeLessThan(1e-6)
+        expect(cells[7]).toBe('已核对')
+      }
+      await compareRows.first().getByRole('button', { name: '查看详情' }).click()
+      await expect(page.getByTestId('detail-drawer')).toBeVisible()
+      const detailDiff = await page.getByTestId('detail-差异').innerText()
+      expect(Number(detailDiff)).toBeCloseTo(Number((await compareRows.first().locator('td').allInnerTexts())[6]), 6)
+      await page.getByTestId('close-detail').click()
+      await page.getByTestId('verify').click()
+      await expect(page.locator('.page-foot')).toContainText('核对通过', { timeout: 5000 })
+    }
   }
 
   expect(browserErrors).toEqual([])
